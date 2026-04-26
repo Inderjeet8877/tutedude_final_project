@@ -1,27 +1,17 @@
 const express = require('express');
-const {
-  getVisitors,
-  getVisitor,
-  createVisitor,
-  updateVisitor,
-  deleteVisitor,
-} = require('../controllers/visitor.controller');
-const { protect, authorize } = require('../middleware/auth.middleware');
-
 const router = express.Router();
+const visitorController = require('../controllers/visitor.controller');
+const authMiddleware = require('../middleware/auth.middleware');
 
-// Apply protect middleware to all routes below
-router.use(protect);
+// Protect all routes
+router.use(authMiddleware.protect);
 
-router
-  .route('/')
-  .get(getVisitors)
-  .post(authorize('Admin', 'Employee'), createVisitor);
+// Basic CRUD routes
+router.get('/', visitorController.getVisitors);
+router.post('/', authMiddleware.authorize('Admin', 'Employee'), visitorController.createVisitor);
 
-router
-  .route('/:id')
-  .get(getVisitor)
-  .put(authorize('Admin', 'Security'), updateVisitor)
-  .delete(authorize('Admin'), deleteVisitor);
+router.get('/:id', visitorController.getVisitor);
+router.put('/:id', authMiddleware.authorize('Admin', 'Security'), visitorController.updateVisitor);
+router.delete('/:id', authMiddleware.authorize('Admin'), visitorController.deleteVisitor);
 
 module.exports = router;

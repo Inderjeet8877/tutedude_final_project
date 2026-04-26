@@ -1,48 +1,49 @@
 const PDFDocument = require('pdfkit');
 
 exports.generatePDFPass = (passData) => {
+  // Returns a promise that resolves with the PDF buffer
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ size: 'A5', layout: 'landscape', margin: 40 });
-      const buffers = [];
+      // 1. Create a new PDF document
+      const doc = new PDFDocument({ margin: 50 });
+      let buffers = [];
 
-      doc.on('data', buffers.push.bind(buffers));
+      // Collect data chunks as they are generated
+      doc.on('data', chunk => buffers.push(chunk));
+      
+      // When done, combine them into one buffer
       doc.on('end', () => {
         const pdfData = Buffer.concat(buffers);
         resolve(pdfData);
       });
 
-      // Draw Border
-      doc.rect(20, 20, doc.page.width - 40, doc.page.height - 40).stroke('#3b82f6');
+      // 2. Add Content to the PDF
+      doc.fontSize(20).text('Visitor Pass', { align: 'center' });
+      doc.moveDown();
+      
+      doc.fontSize(14).text(`Visitor Name: ${passData.visitorName}`);
+      doc.text(`Host: ${passData.employeeName}`);
+      doc.text(`Date & Time: ${new Date(passData.date).toLocaleDateString()} at ${passData.time}`);
+      doc.moveDown();
+      
+      doc.fontSize(16).text(`Pass Code: ${passData.passCode}`, { align: 'center' });
+      doc.moveDown();
 
-      // Header
-      doc.fillColor('#1e40af').fontSize(26).text('OFFICIAL VISITOR PASS', { align: 'center' });
-      doc.moveDown(1.5);
-
-      // Body format
-      doc.fillColor('#334155').fontSize(14);
-      doc.text(`Visitor Name:  ${passData.visitor.name}`);
-      doc.text(`Company:       ${passData.visitor.company || 'N/A'}`);
-      doc.moveDown(0.5);
-      doc.text(`Host:          ${passData.employee.name}`);
-      doc.text(`Date & Time:   ${new Date(passData.date).toDateString()} @ ${passData.time}`);
-      doc.moveDown(0.5);
-      doc.fillColor('#000000').font('Helvetica-Bold').text(`Pass Code: ${passData.passCode}`);
-
-      // Embed QR code from data URI
+      // 3. Add QR Code Image if provided
       if (passData.qrCodeUrl) {
-        // Strip data meta headers from base64 representation
+        // Remove the data metadata from the base64 string
         const base64Data = passData.qrCodeUrl.replace(/^data:image\/png;base64,/, "");
         const imageBuffer = Buffer.from(base64Data, 'base64');
-        doc.image(imageBuffer, 400, 100, { fit: [120, 120] });
+        
+        // Add the image to the center of the document
+        doc.image(imageBuffer, (doc.page.width - 150) / 2, doc.y, { width: 150 });
       }
 
-      // Footer
-      doc.moveDown(3);
-      doc.fillColor('#94a3b8').fontSize(10).text('Please present this QR code or Pass Number at the security desk upon arrival.', 50, doc.page.height - 50, { align: 'center' });
-
+      // 4. Finish the document
       doc.end();
+      
     } catch (error) {
+      console.log("Error creating PDF:", error);
       reject(error);
     }
   });

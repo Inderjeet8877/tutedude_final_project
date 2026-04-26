@@ -8,6 +8,7 @@ import VisitorList from './pages/admin/VisitorList';
 import AddVisitor from './pages/admin/AddVisitor';
 import EditVisitor from './pages/admin/EditVisitor';
 import AdminDashboard from './pages/admin/AdminDashboard';
+import ManageUsers from './pages/admin/ManageUsers';
 
 import EmployeeDashboard from './pages/employee/EmployeeDashboard';
 import RequestAppointment from './pages/employee/RequestAppointment';
@@ -50,6 +51,11 @@ function App() {
             <Route path="/admin/visitors/edit/:id" element={
               <PrivateRoute roles={['Admin']}>
                 <EditVisitor />
+              </PrivateRoute>
+            } />
+            <Route path="/admin/users" element={
+              <PrivateRoute roles={['Admin']}>
+                <ManageUsers />
               </PrivateRoute>
             } />
 

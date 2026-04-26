@@ -6,12 +6,14 @@ const qrService = require('../services/qr.service');
 const pdfService = require('../services/pdf.service');
 const emailService = require('../services/email.service');
 
-// @desc    Issue a pass for an approved appointment
-// @route   POST /api/passes/issue/:appointmentId
-// @access  Private (Admin, Employee)
+// Issue a pass for an approved appointment
 exports.issuePass = async (req, res, next) => {
   try {
-    const appointment = await Appointment.findById(req.params.appointmentId)
+    const appointmentId = req.params.appointmentId;
+    console.log(`Issuing pass for appointment ${appointmentId}`);
+
+    // Step 1: Find the appointment
+    const appointment = await Appointment.findById(appointmentId)
       .populate('visitor')
       .populate('employee', 'name email');
 
@@ -19,145 +21,131 @@ exports.issuePass = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Appointment not found' });
     }
 
+    // Step 2: Ensure it is approved before issuing a pass
     if (appointment.status !== 'Approved') {
-      return res.status(400).json({ success: false, message: 'Cannot issue pass for an unapproved appointment' });
+      return res.status(400).json({ success: false, message: 'Wait for the appointment to be approved first' });
     }
 
-    // Check if pass already exists
-    let pass = await Pass.findOne({ appointment: appointment._id });
-    if (pass) {
+    // Step 3: Check if pass is already created
+    const existingPass = await Pass.findOne({ appointment: appointment._id });
+    if (existingPass) {
       return res.status(400).json({ success: false, message: 'Pass already issued for this appointment' });
     }
 
-    // Generate random secure hex token for the pass validation
-    const passCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+    // Step 4: Generate a simple random string for the pass code
+    const passCode = crypto.randomBytes(4).toString('hex').toUpperCase();
 
-    // The QR code contains the full base URL or simply the code
+    // Step 5: Generate the QR Code Using the standard service
     const validationUrl = `http://localhost:5173/security/verify/${passCode}`;
     const qrCodeUrl = await qrService.generateQRCode(validationUrl);
 
-    // Create the Pass in DB
-    // Valid from current time until end of the day or specifically 24hrs 
+    // Step 6: Create the pass in database
+    // Valid for 1 day
     const validFrom = new Date();
     const validUntil = new Date();
     validUntil.setHours(23, 59, 59, 999);
 
-    pass = await Pass.create({
+    const pass = await Pass.create({
       appointment: appointment._id,
-      passCode,
-      qrCodeUrl,
-      validFrom,
-      validUntil,
+      passCode: passCode,
+      qrCodeUrl: qrCodeUrl,
+      validFrom: validFrom,
+      validUntil: validUntil,
     });
 
+    // Step 7: Generate a simple PDF buffer
+    console.log("Generating simple PDF pass...");
+    const pdfBuffer = await pdfService.generatePDFPass({
+      visitorName: appointment.visitor.name,
+      employeeName: appointment.employee.name,
+      date: appointment.date,
+      time: appointment.time,
+      passCode: passCode,
+      qrCodeUrl: qrCodeUrl
+    });
+
+    // Step 8: Send email directly 
+    console.log("Sending email with the pass...");
+    await emailService.sendEmail({
+      email: appointment.visitor.email,
+      subject: `Your Visitor Pass from ${appointment.employee.name}`,
+      message: `Your appointment is approved. Your pass code is ${passCode}. See attached PDF.`,
+      html: `
+        <h2>Visitor Pass</h2>
+        <p>Hello ${appointment.visitor.name},</p>
+        <p>Your appointment is approved. Here is your pass code: <b>${passCode}</b></p>
+        <p>Present the attached PDF to the security guard.</p>
+      `,
+      attachments: [{
+        filename: `pass_${passCode}.pdf`,
+        content: pdfBuffer,
+        contentType: 'application/pdf'
+      }]
+    });
+
+    // Step 9: Finally, return success
     res.status(201).json({
       success: true,
-      message: 'Pass dynamically generated safely',
+      message: 'Pass generated and email sent successfully',
       data: pass,
     });
 
-    // We dispatch email sending into the background instead of waiting synchronously
-    sendPassEmail(appointment, passCode, qrCodeUrl).catch(err => {
-      console.error('Failed to dispatch background email:', err.message);
-    });
-
   } catch (error) {
+    console.log("Error in issuePass:", error);
     next(error);
   }
 };
 
-// Internal Background logic for gathering pass buffer
-const sendPassEmail = async (appointment, passCode, qrCodeUrl) => {
-    // We compose the PDF payload with the relations
-    const passData = { 
-        visitor: appointment.visitor, 
-        employee: appointment.employee, 
-        date: appointment.date, 
-        time: appointment.time, 
-        passCode,
-        qrCodeUrl
-    };
-
-    const pdfBuffer = await pdfService.generatePDFPass(passData);
-
-    const emailHtml = `
-      <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
-        <h2 style="color: #4F46E5;">Hello ${appointment.visitor.name},</h2>
-        <p>Your appointment with <strong>${appointment.employee.name}</strong> has been <strong>approved</strong>!</p>
-        <p>Attached is your formal <b>Digital Visitor Pass</b>. Open the PDF to view your Pass Code and QR Code.</p>
-        <div style="background-color: #F3F4F6; padding: 15px; border-left: 4px solid #4F46E5; margin: 20px 0;">
-          <strong>Track Your Status Online:</strong>
-          <p style="margin: 5px 0 0 0;">You can view your active passes and appointment statuses at any time by logging into our Visitor Portal.</p>
-          <ul style="margin: 5px 0 0 0; padding-left: 20px;">
-            <li><strong>Portal URL:</strong> <a href="http://localhost:5173/login" style="color: #4F46E5;">http://localhost:5173/login</a></li>
-            <li><strong>Login Email:</strong> ${appointment.visitor.email}</li>
-            <li><strong>Password:</strong> password123</li>
-          </ul>
-        </div>
-        <p>Please present the attachment or login to your portal at the front desk when arriving.</p>
-        <br />
-        <p>Regards,<br/><strong>The Administrative Team</strong></p>
-      </div>
-    `;
-
-    await emailService.sendEmail({
-        email: appointment.visitor.email,
-        subject: `[ACTION REQUIRED] Your Visitor Pass - ${appointment.employee.name}`,
-        message: 'Your Pass has been approved. Please view the attached PDF for access.',
-        html: emailHtml,
-        attachments: [
-            {
-               filename: `Visitor_Pass_${passCode}.pdf`,
-               content: pdfBuffer,
-               contentType: 'application/pdf'
-            }
-        ]
-    });
-};
-
-// @desc    Get Pass details by validating passcode (Scanned)
-// @route   GET /api/passes/verify/:passCode
-// @access  Private (Security, Admin)
+// Verify the pass from the scanner
 exports.verifyPass = async (req, res, next) => {
   try {
-    const pass = await Pass.findOne({ passCode: req.params.passCode })
+    const passCode = req.params.passCode;
+    console.log(`Verifying passCode ${passCode}`);
+
+    // Step 1: Find the pass and its relations
+    const pass = await Pass.findOne({ passCode: passCode })
       .populate({
          path: 'appointment',
          populate: { path: 'visitor employee' }
       });
 
+    // Step 2: Check if it exists
     if (!pass) {
       return res.status(404).json({ success: false, message: 'Invalid Pass Code' });
     }
 
-    // Auto update status if expired
-    if (new Date() > pass.validUntil && pass.status === 'Valid') {
+    // Step 3: Check manually if it has expired early
+    const currentTime = new Date();
+    if (currentTime > pass.validUntil && pass.status === 'Valid') {
         pass.status = 'Expired';
         await pass.save();
     }
 
+    // Step 4: Return it
     res.status(200).json({
       success: true,
       data: pass,
     });
   } catch (error) {
+    console.log("Error in verifyPass:", error);
     next(error);
   }
 };
 
-// @desc    Get all passes for a logged-in visitor
-// @route   GET /api/passes/my-passes
-// @access  Private (Visitor)
+// Get visitor passes
 exports.getVisitorPasses = async (req, res, next) => {
   try {
-    const email = req.user.email;
+    const userEmail = req.user.email;
     
-    const visitor = await Visitor.findOne({ email: new RegExp('^' + email + '$', 'i') });
+    // Step 1: Find the visitor profile linked to this email
+    const visitor = await Visitor.findOne({ email: userEmail });
     if (!visitor) {
       return res.status(200).json({ success: true, count: 0, data: [] });
     }
 
-    const passes = await Pass.find()
+    // Step 2: Get all passes where the appointment belongs to this visitor
+    // Populate the appointment and employee details
+    let passes = await Pass.find()
       .populate({
         path: 'appointment',
         match: { visitor: visitor._id },
@@ -165,14 +153,22 @@ exports.getVisitorPasses = async (req, res, next) => {
       })
       .sort('-createdAt');
 
-    const filteredPasses = passes.filter(pass => pass.appointment !== null);
+    // Step 3: Filter out any passes where the match failed (appointment will be null)
+    const myPasses = [];
+    for (let i = 0; i < passes.length; i++) {
+        if (passes[i].appointment !== null) {
+            myPasses.push(passes[i]);
+        }
+    }
 
+    // Step 4: Send the passes back
     res.status(200).json({
       success: true,
-      count: filteredPasses.length,
-      data: filteredPasses,
+      count: myPasses.length,
+      data: myPasses,
     });
   } catch (error) {
+    console.log("Error in getVisitorPasses:", error);
     next(error);
   }
 };

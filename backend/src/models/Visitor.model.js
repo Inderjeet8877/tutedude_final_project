@@ -26,6 +26,10 @@ const visitorSchema = new mongoose.Schema(
     address: {
       type: String,
     },
+    photo: {
+      type: String,
+      default: null,
+    },
     status: {
       type: String,
       enum: ['Expected', 'Checked-In', 'Checked-Out', 'Cancelled'],

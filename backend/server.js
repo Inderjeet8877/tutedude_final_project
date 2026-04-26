@@ -7,6 +7,7 @@ const { errorHandler } = require('./src/middleware/error.middleware');
 
 // Routes imports
 const authRoutes = require('./src/routes/auth.routes');
+const userRoutes = require('./src/routes/user.routes');
 const visitorRoutes = require('./src/routes/visitor.routes');
 const appointmentRoutes = require('./src/routes/appointment.routes');
 const passRoutes = require('./src/routes/pass.routes');
@@ -29,6 +30,7 @@ app.use(cookieParser());
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/visitors', visitorRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/passes', passRoutes);

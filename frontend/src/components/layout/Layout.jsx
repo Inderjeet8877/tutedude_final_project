@@ -2,7 +2,7 @@ import React, { useContext, useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../../context/AuthContext';
 import { motion } from 'framer-motion';
-import { LogOut, Users, PlusCircle, Shield, Home, Menu, X, Calendar } from 'lucide-react';
+import { LogOut, Users, PlusCircle, Shield, Home, Menu, X, Calendar, UserCog } from 'lucide-react';
 
 const Layout = () => {
   const { user, logout } = useContext(AuthContext);
@@ -21,6 +21,7 @@ const Layout = () => {
           { name: 'Dashboard', to: '/admin/dashboard', icon: Home },
           { name: 'Visitors', to: '/admin/visitors', icon: Users },
           { name: 'Add Visitor', to: '/admin/visitors/add', icon: PlusCircle },
+          { name: 'Manage Staff', to: '/admin/users', icon: UserCog },
           { name: 'Scanner', to: '/security/scanner', icon: Shield },
           { name: 'My Appointments', to: '/employee/appointments', icon: Calendar },
         ];

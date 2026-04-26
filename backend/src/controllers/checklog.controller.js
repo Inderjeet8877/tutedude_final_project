@@ -1,25 +1,28 @@
 const Pass = require('../models/Pass.model');
 const Visitor = require('../models/Visitor.model');
 const CheckLog = require('../models/CheckLog.model');
-const { sendOTP } = require('../services/sms.service');
+const smsService = require('../services/sms.service');
 
-// @desc    Scan a Pass Code and trigger Check-In or Check-Out
-// @route   POST /api/checklogs/scan
-// @access  Private (Security, Admin)
+// Scan Pass Code
 exports.scanPass = async (req, res, next) => {
   try {
-    const { passCode } = req.body;
+    console.log("Scanning pass code...");
+    const passCode = req.body.passCode;
 
+    // 1. Basic validation
     if (!passCode) {
-      return res.status(400).json({ success: false, message: 'Please provide a pass details' });
+      return res.status(400).json({ success: false, message: 'Pass code is required' });
     }
 
-    // 1. Validate Pass
-    const pass = await Pass.findOne({ passCode }).populate('appointment');
+    // 2. Find the pass
+    console.log("Looking up pass in DB:", passCode);
+    const pass = await Pass.findOne({ passCode: passCode }).populate('appointment');
+    
     if (!pass) {
       return res.status(404).json({ success: false, message: 'Invalid Pass Code' });
     }
 
+    // 3. Check pass status
     if (pass.status === 'Revoked' || pass.status === 'Expired') {
       return res.status(403).json({ success: false, message: `Pass is ${pass.status}` });
     }
@@ -27,118 +30,116 @@ exports.scanPass = async (req, res, next) => {
     if (new Date() > pass.validUntil) {
       pass.status = 'Expired';
       await pass.save();
-      return res.status(403).json({ success: false, message: 'Pass has expired limit thresholds' });
+      return res.status(403).json({ success: false, message: 'Pass has expired' });
     }
 
-    // Find the visitor attached to this appointment
     const visitorId = pass.appointment.visitor;
 
-    // 2. Check if there is an active (open) check-log for this pass
+    // 4. Determine if checking in or checking out
+    console.log("Checking for active log...");
     let activeLog = await CheckLog.findOne({ pass: pass._id, checkOutTime: { $exists: false } });
 
     if (!activeLog) {
-      // PERFORM CHECK-IN
+      // THIS IS A CHECK-IN FLOW
+      console.log("Starting check-in flow...");
+      
       if (pass.status === 'Used') {
-          return res.status(400).json({ success: false, message: 'This pass has already been used and exhausted.' });
+          return res.status(400).json({ success: false, message: 'Pass already exhausted' });
       }
 
-      // Generate OTP and send instead of checking in immediately
+      // Generate a simple 6-digit OTP
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const otpExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
-
+      
+      // Save it to the visitor
       const visitor = await Visitor.findById(visitorId);
       visitor.otp = otp;
-      visitor.otpExpiry = otpExpiry;
+      visitor.otpExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
       await visitor.save();
 
-      // Send SMS asynchronously
-      sendOTP(visitor.phone, otp);
+      console.log(`Generated OTP for ${visitor.phone} / ${visitor.name}`);
+
+      // Wait to send the SMS
+      await smsService.sendOTP(visitor.phone, otp);
 
       return res.status(200).json({
         success: true,
         action: 'OTP_REQUIRED',
-        message: `OTP sent to ${visitor.phone.substring(0, 2)}******${visitor.phone.substring(visitor.phone.length - 2)}`,
-        passCode: pass.passCode // Send back passCode to help UI persist it
+        message: `OTP sent to ${visitor.phone}`,
+        passCode: pass.passCode
       });
 
     } else {
-      // PERFORM CHECK-OUT
+      // THIS IS A CHECK-OUT FLOW
+      console.log("Starting check-out flow...");
+      
+      // Update the log
       activeLog.checkOutTime = new Date();
       await activeLog.save();
 
-      // Update statuses
+      // Update visitor status
       await Visitor.findByIdAndUpdate(visitorId, { status: 'Checked-Out' });
       
-      pass.status = 'Used'; // Mark single-use pass as exhausted
+      // Mark pass as used so they can't come back in with it
+      pass.status = 'Used';
       await pass.save();
 
+      console.log("Check-out complete.");
       return res.status(200).json({
         success: true,
         action: 'CHECK_OUT',
-        message: 'Visitor successfully Checked-Out.',
+        message: 'Checked-Out successfully.',
         log: activeLog
       });
     }
 
   } catch (error) {
+    console.log("Error in scanPass:", error);
     next(error);
   }
 };
 
-// @desc    Get all check-logs
-// @route   GET /api/checklogs
-// @access  Private (Admin, Security)
-exports.getLogs = async (req, res, next) => {
-  try {
-    const logs = await CheckLog.find()
-      .populate('visitor', 'name company')
-      .populate('securityGuard', 'name')
-      .sort('-checkInTime');
-
-    res.status(200).json({
-      success: true,
-      count: logs.length,
-      data: logs
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// @desc    Verify OTP and Check-In
-// @route   POST /api/checklogs/verify-otp
-// @access  Private (Security, Admin)
+// Verify OTP
 exports.verifyOtpAndCheckIn = async (req, res, next) => {
   try {
-    const { passCode, otp } = req.body;
+    console.log("Verifying OTP...");
+    const passCode = req.body.passCode;
+    const otp = req.body.otp;
 
+    // 1. Validation
     if (!passCode || !otp) {
       return res.status(400).json({ success: false, message: 'Please provide pass code and OTP' });
     }
 
-    const pass = await Pass.findOne({ passCode }).populate('appointment');
+    // 2. Find the pass again
+    const pass = await Pass.findOne({ passCode: passCode }).populate('appointment');
     if (!pass) {
       return res.status(404).json({ success: false, message: 'Invalid Pass Code' });
     }
 
+    // 3. Find the visitor
     const visitorId = pass.appointment.visitor;
     const visitor = await Visitor.findById(visitorId);
 
+    // 4. Check OTP match
+    console.log(`Checking received OTP [${otp}]`);
     if (!visitor.otp || visitor.otp !== otp) {
       return res.status(400).json({ success: false, message: 'Invalid OTP' });
     }
 
+    // 5. Check if expired
     if (new Date() > visitor.otpExpiry) {
       return res.status(400).json({ success: false, message: 'OTP has expired' });
     }
 
-    // OTP Valid. Perform Check In.
-    // Clear OTP
+    console.log("OTP was valid. Performing check-in.");
+    
+    // 6. Clear OTP and check in
     visitor.otp = undefined;
     visitor.otpExpiry = undefined;
     visitor.status = 'Checked-In';
     await visitor.save();
 
+    // 7. Create log
     const log = await CheckLog.create({
       pass: pass._id,
       visitor: visitorId,
@@ -146,14 +147,35 @@ exports.verifyOtpAndCheckIn = async (req, res, next) => {
       checkInTime: new Date()
     });
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       action: 'CHECK_IN',
-      message: 'Visitor successfully Checked-In via OTP.',
-      log
+      message: 'Checked-In successfully.',
+      log: log
     });
 
   } catch (error) {
+    console.log("Error in verifyOtpAndCheckIn:", error);
+    next(error);
+  }
+};
+
+// Get check logs
+exports.getLogs = async (req, res, next) => {
+  try {
+    console.log("Getting all check logs...");
+    const logs = await CheckLog.find()
+      .populate('visitor', 'name company')
+      .populate('securityGuard', 'name')
+      .sort({ checkInTime: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: logs.length,
+      data: logs
+    });
+  } catch (error) {
+    console.log("Error in getLogs:", error);
     next(error);
   }
 };

@@ -1,11 +1,11 @@
 const express = require('express');
-const { getAdminStats } = require('../controllers/dashboard.controller');
-const { protect, authorize } = require('../middleware/auth.middleware');
-
 const router = express.Router();
+const dashboardController = require('../controllers/dashboard.controller');
+const authMiddleware = require('../middleware/auth.middleware');
 
-router.use(protect);
+// Only logged in admins can view the dashboard stats
+router.use(authMiddleware.protect);
 
-router.get('/stats', authorize('Admin'), getAdminStats);
+router.get('/stats', authMiddleware.authorize('Admin'), dashboardController.getAdminStats);
 
 module.exports = router;
