@@ -56,17 +56,27 @@ exports.scanPass = async (req, res, next) => {
       visitor.otpExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
       await visitor.save();
 
-      console.log(`Generated OTP for ${visitor.phone} / ${visitor.name}`);
+      console.log(`Generated OTP for ${visitor.name}: ${otp}`);
 
-      // Wait to send the SMS
-      await smsService.sendOTP(visitor.phone, otp);
+      const smsResult = await smsService.sendOTP(visitor.phone, otp);
 
-      return res.status(200).json({
+      const isDev = process.env.NODE_ENV === 'development';
+      const responsePayload = {
         success: true,
         action: 'OTP_REQUIRED',
-        message: `OTP sent to ${visitor.phone}`,
-        passCode: pass.passCode
-      });
+        message: smsResult.sent
+          ? `OTP sent to ${visitor.phone}`
+          : `SMS delivery failed — ${isDev ? `DEV OTP: ${otp}` : 'please check the backend console'}`,
+        passCode: pass.passCode,
+        smsSent: smsResult.sent,
+      };
+
+      // Expose OTP in response body only during development so security guard can read it out
+      if (isDev && !smsResult.sent) {
+        responsePayload.devOtp = otp;
+      }
+
+      return res.status(200).json(responsePayload);
 
     } else {
       // THIS IS A CHECK-OUT FLOW

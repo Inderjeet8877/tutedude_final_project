@@ -12,6 +12,7 @@ const SecurityScanner = () => {
   const [otpMode, setOtpMode] = useState(false);
   const [otp, setOtp] = useState('');
   const [scannedPassCode, setScannedPassCode] = useState('');
+  const [smsStatus, setSmsStatus] = useState(null); // { sent, message, devOtp }
   const inputRef = useRef(null);
 
   // Keep focus on input for physical barcode scanners in manual mode
@@ -39,6 +40,7 @@ const SecurityScanner = () => {
 
       if (data.action === 'OTP_REQUIRED') {
         setScannedPassCode(data.passCode);
+        setSmsStatus({ sent: data.smsSent, message: data.message, devOtp: data.devOtp });
         setOtpMode(true);
         return; // Don't show result yet, wait for OTP
       }
@@ -85,6 +87,7 @@ const SecurityScanner = () => {
       setOtp('');
       setScannedPassCode('');
       setPassCode('');
+      setSmsStatus(null);
     } catch (err) {
       setResult({
         type: 'error',
@@ -164,7 +167,18 @@ const SecurityScanner = () => {
                   <div className="text-center mb-4">
                     <ShieldCheck className="w-12 h-12 text-cyan-400 mx-auto mb-2" />
                     <h3 className="text-xl font-bold text-white tracking-widest uppercase">MFA Required</h3>
-                    <p className="text-slate-400 text-sm">Enter the OTP sent to visitor's registered mobile number</p>
+                    {smsStatus?.sent === false ? (
+                      <div className="mt-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
+                        <p>SMS delivery failed. {smsStatus.message}</p>
+                        {smsStatus.devOtp && (
+                          <p className="mt-1 font-mono text-lg font-bold tracking-widest text-amber-300">
+                            DEV OTP: {smsStatus.devOtp}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-slate-400 text-sm">Enter the OTP sent to visitor's registered mobile number</p>
+                    )}
                   </div>
                   <div className="relative group max-w-sm mx-auto w-full">
                     <input
@@ -182,7 +196,7 @@ const SecurityScanner = () => {
                   <div className="flex justify-center gap-4">
                     <button
                       type="button"
-                      onClick={() => { setOtpMode(false); setOtp(''); setLoading(false); }}
+                      onClick={() => { setOtpMode(false); setOtp(''); setLoading(false); setSmsStatus(null); }}
                       className="px-6 py-4 rounded-xl font-bold text-slate-400 hover:text-white border border-slate-700 hover:bg-slate-800 transition-all"
                     >
                       CANCEL

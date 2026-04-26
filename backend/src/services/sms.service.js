@@ -1,30 +1,39 @@
 const twilio = require('twilio');
 
+// Normalize phone to E.164 format required by Twilio
+const normalizePhone = (phone) => {
+  let normalized = phone.replace(/[\s\-().]/g, '');
+  if (!normalized.startsWith('+')) {
+    // Default to India (+91) if no country code
+    normalized = '+91' + normalized;
+  }
+  return normalized;
+};
+
 exports.sendOTP = async (phone, otp) => {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const twilioNumber = process.env.TWILIO_PHONE_NUMBER;
+
+  if (!accountSid || !authToken || !twilioNumber) {
+    console.warn("⚠️  Missing Twilio credentials — SMS not sent. OTP:", otp);
+    return { sent: false, reason: 'missing_credentials' };
+  }
+
+  const normalizedPhone = normalizePhone(phone);
+  console.log(`Sending OTP to ${normalizedPhone}`);
+
   try {
-    // 1. Get twilio settings
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const twilioNumber = process.env.TWILIO_PHONE_NUMBER;
-
-    if (!accountSid || !authToken || !twilioNumber) {
-      console.log("Missing Twilio credentials, unable to send SMS");
-      return;
-    }
-
-    // 2. Initialize twilio client
     const client = twilio(accountSid, authToken);
-
-    // 3. Send message
-    console.log(`Sending OTP to ${phone}`);
     const message = await client.messages.create({
-      body: `Your OTP for check-in is: ${otp}`,
+      body: `Your visitor check-in OTP is: ${otp}. Valid for 5 minutes.`,
       from: twilioNumber,
-      to: phone
+      to: normalizedPhone
     });
-
-    console.log("SMS sent successfully! Message SID:", message.sid);
+    console.log("SMS sent successfully! SID:", message.sid);
+    return { sent: true };
   } catch (error) {
-    console.log("Error sending SMS:", error);
+    console.error("❌ SMS send failed:", error.message);
+    return { sent: false, reason: error.message };
   }
 };
